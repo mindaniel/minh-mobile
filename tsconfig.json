@@ -1,0 +1,17 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"types": ["bun"],
+		"baseUrl": ".",
+		"paths": {
+			"@cline/core": ["../clinemin/sdk/packages/core/dist/index.d.ts"],
+			"@cline/shared": ["../clinemin/sdk/packages/shared/dist/index.d.ts"]
+		}
+	},
+	"include": ["bridge", "dev"]
+}

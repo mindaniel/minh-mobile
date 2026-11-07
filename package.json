@@ -1,0 +1,22 @@
+{
+	"name": "minh-mobile",
+	"private": true,
+	"type": "module",
+	"description": "Chat with your minh (clinemin) agents from a phone, using private GitHub issues as the message channel.",
+	"scripts": {
+		"bridge": "bun --conditions=development bridge/main.ts",
+		"setup": "bun --conditions=development bridge/main.ts setup",
+		"app": "bun dev/serve-app.ts",
+		"fake-github": "bun dev/fake-github.ts",
+		"icons": "node --experimental-strip-types dev/make-icons.ts",
+		"test": "bun test",
+		"typecheck": "bun ../clinemin/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"web-push": "3.6.7"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.13",
+		"@types/web-push": "3.6.4"
+	}
+}

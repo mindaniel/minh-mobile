@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+	<title>minh</title>
+	<meta name="description" content="Chat with your minh agents" />
+	<meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)" />
+	<meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+	<meta name="apple-mobile-web-app-title" content="minh" />
+	<link rel="manifest" href="manifest.webmanifest" />
+	<link rel="icon" href="icon.svg" type="image/svg+xml" />
+	<link rel="apple-touch-icon" href="icon-180.png" />
+	<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+	<!-- First run: where the chats live. -->
+	<section id="setup" class="setup" hidden>
+		<div class="setup-card">
+			<div class="brand"><img src="icon.svg" alt="" width="40" height="40" /><h1>minh</h1></div>
+			<p>Chats live in a private GitHub repo that your minh bridge watches.</p>
+			<form id="setup-form">
+				<label>Chat repo
+					<input name="repo" placeholder="your-name/minh-chat" autocomplete="off" autocapitalize="off" spellcheck="false" required />
+				</label>
+				<label>GitHub token
+					<input name="token" type="password" placeholder="github_pat_…" autocomplete="off" required />
+				</label>
+				<p class="hint">A fine-grained token from <b>your</b> account, for this one repo: Issues and Contents, read and write. It stays on this phone.</p>
+				<details class="advanced">
+					<summary>Advanced</summary>
+					<label>API address
+						<input name="apiBase" placeholder="https://api.github.com" autocomplete="off" autocapitalize="off" spellcheck="false" />
+					</label>
+				</details>
+				<p id="setup-error" class="error" hidden></p>
+				<button type="submit" class="primary">Connect</button>
+			</form>
+		</div>
+	</section>
+
+	<div id="app" class="app" hidden>
+		<aside id="drawer" class="drawer" aria-label="Chats">
+			<div class="drawer-head">
+				<div class="brand small"><img src="icon.svg" alt="" width="26" height="26" /><span>minh</span></div>
+				<button id="drawer-new" class="pill">New chat</button>
+			</div>
+			<p class="drawer-label">Recents</p>
+			<nav id="chat-list" class="chat-list"></nav>
+			<div class="drawer-foot">
+				<button id="notify-btn" class="link">Turn on notifications</button>
+				<div class="account"><span id="account-name"></span><button id="signout-btn" class="link">Sign out</button></div>
+			</div>
+		</aside>
+		<div id="scrim" class="scrim" hidden></div>
+
+		<main class="main">
+			<header class="topbar">
+				<button id="menu-btn" class="icon-btn" aria-label="Chats">
+					<svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+				</button>
+				<h2 id="chat-title" class="title">minh</h2>
+				<button id="new-btn" class="icon-btn" aria-label="New chat">
+					<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+				</button>
+			</header>
+
+			<div id="scroller" class="scroller">
+				<div id="empty" class="empty">
+					<img src="icon.svg" alt="" width="44" height="44" />
+					<p id="greeting">What should we work on?</p>
+				</div>
+				<div id="messages" class="messages"></div>
+			</div>
+
+			<form id="composer" class="composer">
+				<div class="composer-box">
+					<textarea id="input" rows="1" placeholder="Message minh" enterkeyhint="send"></textarea>
+					<button id="stop-btn" type="button" class="send stop" aria-label="Stop" hidden>
+						<svg viewBox="0 0 24 24" width="16" height="16"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
+					</button>
+					<button id="send-btn" type="submit" class="send" aria-label="Send" disabled>
+						<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+					</button>
+				</div>
+				<p id="status-line" class="status-line"></p>
+			</form>
+		</main>
+	</div>
+
+	<div id="toast" class="toast" hidden></div>
+	<script type="module" src="app.js"></script>
+</body>
+</html>

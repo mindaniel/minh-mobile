@@ -102,8 +102,17 @@ export class Bridge {
 		writeJson(statePath(), this.state);
 	}
 
+	private readonly ignored = new Set<string>();
+
 	private allowed(login: string | undefined): boolean {
-		return !!login && this.config.allowedUsers.includes(login.toLowerCase());
+		const ok = !!login && this.config.allowedUsers.includes(login.toLowerCase());
+		if (!ok && login && !this.ignored.has(login)) {
+			this.ignored.add(login);
+			console.warn(
+				`ignoring messages from ${login}: not in allowedUsers (${this.config.allowedUsers.join(", ")}) in config.json`,
+			);
+		}
+		return ok;
 	}
 
 	async start(): Promise<void> {
@@ -258,7 +267,7 @@ export class Bridge {
 		let sessionId: string | undefined;
 		try {
 			const resolved = this.hub.resolve(chat.options);
-			const key = `${resolved.provider}|${resolved.model}|${resolved.autoApprove}`;
+			const key = `${resolved.provider}|${resolved.model}|${resolved.autoApprove}|${resolved.cwd}`;
 			const title = chat.title || chatTitle(text);
 			sessionId = chat.sessionId;
 			if (sessionId && !(await this.hub.ensureLive(sessionId, chat.options))) sessionId = undefined;

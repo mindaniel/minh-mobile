@@ -54,6 +54,10 @@ export interface ChatOptions {
 	model?: string;
 	mode?: "act" | "plan";
 	autoApprove?: boolean;
+	/** Folder on the server the chat works in. A relative path is inside the bridge's default folder. */
+	cwd?: string;
+	/** Make `cwd` if it does not exist yet. */
+	createFolder?: boolean;
 }
 
 const OPTIONS_PATTERN = /^<!-- minh-options (\{.*?\}) -->\r?\n?/;
@@ -78,6 +82,8 @@ export function readOptions(body: string | null | undefined): ChatOptions | unde
 	if (text(raw.model)) options.model = text(raw.model);
 	if (raw.mode === "act" || raw.mode === "plan") options.mode = raw.mode;
 	if (typeof raw.autoApprove === "boolean") options.autoApprove = raw.autoApprove;
+	if (text(raw.cwd)) options.cwd = text(raw.cwd);
+	if (raw.createFolder === true) options.createFolder = true;
 	return options;
 }
 

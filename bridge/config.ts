@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { canSeal, isSealed, seal, unseal } from "./secrets";
 
 export interface BridgeConfig {
 	/** "owner/name" of the private chat repo. */
@@ -13,6 +14,8 @@ export interface BridgeConfig {
 	clinemin: string;
 	/** Folder new chats run in. */
 	cwd: string;
+	/** Folders to always offer in the phone's folder picker (recent ones are added). */
+	folders?: string[];
 	/** Defaults to the provider/model minh used last. */
 	provider?: string;
 	model?: string;
@@ -60,10 +63,26 @@ export function loadConfig(): BridgeConfig {
 			`${path} is missing ${[...missing, ...(raw.allowedUsers?.length ? [] : ["allowedUsers"])].join(", ")}. Run "bun run setup" again.`,
 		);
 	}
+	// Secrets left in plain text (older setups, or typed in by hand) get sealed now.
+	if (canSeal && (!isSealed(raw.token) || (raw.vapid && !isSealed(raw.vapid.privateKey)))) {
+		writeJson(path, sealSecrets(raw));
+		console.log(`Sealed the token in ${path} for this Windows account.`);
+	}
 	return {
 		autoApproveTools: true,
 		pollSeconds: 3,
 		...raw,
+		token: unseal(raw.token!),
+		...(raw.vapid ? { vapid: { ...raw.vapid, privateKey: unseal(raw.vapid.privateKey) } } : {}),
 		allowedUsers: raw.allowedUsers.map((user) => user.toLowerCase()),
 	} as BridgeConfig;
+}
+
+/** The config as it goes on disk: token and push key sealed (see secrets.ts). */
+export function sealSecrets<T extends Partial<BridgeConfig>>(config: T): T {
+	return {
+		...config,
+		...(config.token ? { token: seal(config.token) } : {}),
+		...(config.vapid ? { vapid: { ...config.vapid, privateKey: seal(config.vapid.privateKey) } } : {}),
+	};
 }

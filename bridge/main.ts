@@ -14,9 +14,11 @@ import {
 	configPath,
 	loadConfig,
 	readJson,
+	sealSecrets,
 	statePath,
 	writeJson,
 } from "./config";
+import { unseal } from "./secrets";
 import { GitHub, GitHubError } from "./github";
 import { generateVapid } from "./push";
 
@@ -39,7 +41,7 @@ async function setup(): Promise<void> {
 			"(github.com > Settings > Developer settings)",
 	);
 	const token = ask("Token", previous.token ? "keep current" : undefined);
-	const finalToken = token === "keep current" ? previous.token! : token;
+	const finalToken = token === "keep current" ? unseal(previous.token!) : token;
 	if (!finalToken) throw new Error("A token is needed.");
 
 	const github = new GitHub(finalToken, repo, previous.apiBase);
@@ -89,9 +91,11 @@ async function setup(): Promise<void> {
 		cwd,
 		autoApproveTools: !/^n/i.test(autoApprove),
 		pollSeconds: previous.pollSeconds ?? 3,
-		vapid: previous.vapid ?? generateVapid(`https://github.com/${me.login}`),
+		vapid: previous.vapid
+			? { ...previous.vapid, privateKey: unseal(previous.vapid.privateKey) }
+			: generateVapid(`https://github.com/${me.login}`),
 	};
-	writeJson(configPath(), config);
+	writeJson(configPath(), sealSecrets(config));
 	if (!existsSync(statePath())) writeJson(statePath(), freshState());
 	console.log(`\nSaved ${configPath()}. Start the bridge with: bun run bridge`);
 }

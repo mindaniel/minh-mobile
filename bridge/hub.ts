@@ -4,12 +4,13 @@
  * this project never changes clinemin and always matches the minh you run.
  */
 
-import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { basename, join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import type * as CoreSdk from "@cline/core";
 import type * as SharedSdk from "@cline/shared";
 import type { BridgeConfig } from "./config";
+import { folderChoices, isFolder, recentFolders } from "./folders";
 import type { ChatOptions } from "./protocol";
 
 export interface ResolvedOptions {
@@ -17,11 +18,14 @@ export interface ResolvedOptions {
 	model: string;
 	mode: "act" | "plan";
 	autoApprove: boolean;
+	cwd: string;
 }
 
 /** Published to .minh/options.json for the phone's model picker. */
 export interface OptionsCatalog {
 	defaults?: ResolvedOptions;
+	/** Folders to offer: the default, config.json's, then recently used ones. */
+	folders: string[];
 	providers: Array<{
 		id: string;
 		name: string;
@@ -133,11 +137,21 @@ export class Hub {
 					: 'No provider/model yet. Chat once in minh on this account, or set "provider" and "model" in config.json.',
 			);
 		}
+		// "my-project" means a folder inside the default one.
+		const cwd = resolvePath(this.config.cwd, options.cwd || ".");
+		if (!isFolder(cwd)) {
+			if (!options.createFolder) {
+				throw new Error(`Folder not found on the server: ${cwd}. Pick "Create it if missing" to make it.`);
+			}
+			mkdirSync(cwd, { recursive: true });
+			console.log(`made folder ${cwd}`);
+		}
 		return {
 			provider,
 			model,
 			mode: options.mode ?? "act",
 			autoApprove: options.autoApprove ?? this.config.autoApproveTools,
+			cwd,
 		};
 	}
 
@@ -155,6 +169,7 @@ export class Hub {
 		} catch {}
 		return {
 			defaults,
+			folders: folderChoices(this.config.cwd, this.config.folders, recentFolders()),
 			providers: providers
 				.filter((provider) => provider.enabled || provider.id === defaults?.provider)
 				.map((provider) => ({
@@ -170,8 +185,7 @@ export class Hub {
 
 	private async startRequest(options?: ChatOptions): Promise<StartRequest> {
 		const { core, shared } = this.sdk;
-		const { provider, model, mode, autoApprove } = this.resolve(options);
-		const cwd = this.config.cwd;
+		const { provider, model, mode, autoApprove, cwd } = this.resolve(options);
 		// The same prompt minh builds for a terminal session (apps/cli/src/runtime/prompt.ts).
 		const systemPrompt = shared.buildClineSystemPrompt({
 			ide: "Terminal Shell",

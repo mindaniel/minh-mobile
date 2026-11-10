@@ -35,10 +35,15 @@ class FakeHub {
 			model: options.model ?? "gemini-pro",
 			mode: options.mode ?? "act",
 			autoApprove: options.autoApprove ?? true,
+			cwd: options.cwd ?? "/work",
 		};
 	}
 	async catalog() {
-		return { defaults: this.resolve(), providers: [{ id: "gemini-web", name: "Gemini", models: [] }] };
+		return {
+			defaults: this.resolve(),
+			folders: ["/work"],
+			providers: [{ id: "gemini-web", name: "Gemini", models: [] }],
+		};
 	}
 	async startSession(_title: string, _issue: number, options?: ChatOptions, from?: string) {
 		const id = `s${this.sessions.size + 1}`;

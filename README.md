@@ -48,6 +48,15 @@ Each person (each Windows account on the server) runs their own bridge, with the
 - **New chat:** tap **+** and type. You can also open an issue on github.com.
 - **Model and settings:** tap the model name under the message box to pick:
   - **Provider and model:** chosen from the ones set up in minh on the server. The bridge lists them in `.minh/options.json` when it starts and every 10 minutes.
+  - **Folder:** the folder on the server the chat works in. The list offers:
+    - the default `cwd` from config.json;
+    - any folders you add under `"folders"` in config.json;
+    - folders minh worked in recently, in the terminal or from the phone (temp and system folders are left out).
+
+    **Other folder…** takes any path you type. The app remembers typed paths on that device.
+    - A name alone, like `my-app`, means a folder inside the default one.
+    - Tick **Create it if missing** to make a new folder on the fly.
+    - Without that box ticked, a folder that doesn't exist gets an error reply.
   - **Mode:** Act or Plan.
   - **Tools:** run freely, or ask you each time.
 
@@ -78,3 +87,8 @@ bun run app              # app on http://localhost:8791
 
 - **GitHub API:** 5,000 requests an hour per token. Polls that find nothing new are free (ETag), and the bridge spaces out reply edits to stay below GitHub's limit on writes.
 - **Security:** the phone token is stored in the browser on your phone. Anyone who can unlock the phone can use it, but only on the one repo.
+- **Secrets on the server:** the agent's tools can read any file your Windows account can. Everything a chat reads also goes to the model's provider. So the bridge keeps its token and push key in `config.json` sealed with Windows DPAPI (`dpapi:…`); only your Windows account on that machine can open them. A plain-text token typed into the file by hand gets sealed the next time the bridge starts.
+
+  This stops accidental leaks, like a chat listing your home folder. It doesn't stop a program running as you that sets out to unseal it.
+
+  Also: give chats a work folder, not your whole home folder, and keep other secrets out of the folders chats work in.

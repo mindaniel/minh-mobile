@@ -1,9 +1,14 @@
 // Keeps the app opening offline and shows push notifications from the bridge.
-const CACHE = "minh-v1";
+const CACHE = "minh-v2";
 const SHELL = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (event) => {
-	event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+	event.waitUntil(
+		caches
+			.open(CACHE)
+			.then((cache) => cache.addAll(SHELL.map((path) => new Request(path, { cache: "no-cache" }))))
+			.then(() => self.skipWaiting()),
+	);
 });
 
 self.addEventListener("activate", (event) => {
@@ -16,12 +21,15 @@ self.addEventListener("activate", (event) => {
 });
 
 // App files: network first so updates show up, cache when offline.
-// Everything else (the GitHub API) goes straight to the network.
+// "no-cache" asks the server every time (a cheap 304 when nothing changed):
+// GitHub Pages lets browsers keep files 10 minutes, which can pair a new
+// index.html with an old app.js. Everything else (the GitHub API) goes
+// straight to the network.
 self.addEventListener("fetch", (event) => {
 	const url = new URL(event.request.url);
 	if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
 	event.respondWith(
-		fetch(event.request)
+		fetch(event.request, { cache: "no-cache" })
 			.then((response) => {
 				const copy = response.clone();
 				caches.open(CACHE).then((cache) => cache.put(event.request, copy));

@@ -3,6 +3,9 @@
 // Comment format: see bridge/protocol.ts.
 
 const $ = (id) => document.getElementById(id);
+// Shown at the bottom of the drawer. Bump with each release, with the ?v= in index.html.
+const APP_VERSION = "v3";
+const APP_UPDATED = "2026-11-10";
 const STORE_KEY = "minh-mobile";
 const CHAT_POLL_MS = 3000;
 const LIST_POLL_MS = 15000;
@@ -190,24 +193,84 @@ $("scrim").addEventListener("click", () => openDrawer(false));
 $("new-btn").addEventListener("click", () => newChat());
 $("drawer-new").addEventListener("click", () => newChat());
 
+// Pinned chats carry this label; deleted ones (when GitHub won't really delete) carry the other.
+const PIN_LABEL = "pinned";
+const DELETED_LABEL = "deleted";
+const hasLabel = (issue, name) => (issue.labels || []).some((label) => (label.name || label) === name);
+const isChat = (issue) => !issue.pull_request && !hasLabel(issue, DELETED_LABEL);
+
+let archived = [];
+let showArchived = false;
+
+function chatButton(chat) {
+	const pin = hasLabel(chat, PIN_LABEL) ? `<span class="pin">●</span>` : "";
+	return `<button class="chat-item${current?.number === chat.number ? " active" : ""}" data-n="${chat.number}">${pin}${escapeHtml(chat.title)}<small>${relativeTime(chat.updated_at)}</small></button>`;
+}
+
 function renderChatList() {
 	const list = $("chat-list");
-	if (!chats.length) {
-		list.innerHTML = `<p class="none">No chats yet.</p>`;
+	const query = $("search").value.trim().toLowerCase();
+	const match = (chat) => !query || chat.title.toLowerCase().includes(query);
+	$("archived-btn").textContent = showArchived ? "Back to chats" : "Archived chats";
+	if (showArchived) {
+		const shown = archived.filter(match);
+		list.innerHTML =
+			`<p class="drawer-label">Archived</p>` +
+			(shown.length ? shown.map(chatButton).join("") : `<p class="none">${query ? "No matches." : "Nothing archived."}</p>`);
 		return;
 	}
-	list.innerHTML = chats
-		.map(
-			(chat) =>
-				`<button class="chat-item${current?.number === chat.number ? " active" : ""}" data-n="${chat.number}">${escapeHtml(chat.title)}<small>${relativeTime(chat.updated_at)}</small></button>`,
-		)
-		.join("");
+	const shown = chats.filter(match);
+	if (!shown.length) {
+		list.innerHTML = `<p class="none">${query ? "No matches." : "No chats yet."}</p>`;
+		return;
+	}
+	const pinned = shown.filter((chat) => hasLabel(chat, PIN_LABEL));
+	const rest = shown.filter((chat) => !hasLabel(chat, PIN_LABEL));
+	list.innerHTML =
+		(pinned.length ? `<p class="drawer-label">Pinned</p>${pinned.map(chatButton).join("")}` : "") +
+		(rest.length ? `<p class="drawer-label">Recents</p>${rest.map(chatButton).join("")}` : "");
 }
+
+// A tap opens a chat; a long press (or right click) opens its actions.
+let pressTimer = 0;
+let pressed = false;
+$("chat-list").addEventListener("pointerdown", (event) => {
+	const item = event.target.closest("[data-n]");
+	pressed = false;
+	if (!item || event.button !== 0) return;
+	clearTimeout(pressTimer);
+	pressTimer = setTimeout(() => {
+		pressed = true;
+		navigator.vibrate?.(10);
+		openActions(Number(item.dataset.n));
+	}, 500);
+});
+for (const type of ["pointerup", "pointercancel", "pointerleave", "scroll"]) {
+	$("chat-list").addEventListener(type, () => clearTimeout(pressTimer), true);
+}
+$("chat-list").addEventListener("contextmenu", (event) => {
+	const item = event.target.closest("[data-n]");
+	if (!item) return;
+	event.preventDefault();
+	clearTimeout(pressTimer);
+	if (!pressed) openActions(Number(item.dataset.n));
+	pressed = true;
+});
 $("chat-list").addEventListener("click", (event) => {
 	const item = event.target.closest("[data-n]");
 	if (!item) return;
+	if (pressed) {
+		pressed = false;
+		return;
+	}
 	openDrawer(false);
 	openChat(Number(item.dataset.n));
+});
+$("search").addEventListener("input", renderChatList);
+$("archived-btn").addEventListener("click", () => {
+	showArchived = !showArchived;
+	renderChatList();
+	if (showArchived) refreshArchived();
 });
 
 async function refreshList() {
@@ -216,11 +279,140 @@ async function refreshList() {
 			conditional: true,
 		});
 		if (!changed && chats.length) return;
-		chats = (data || []).filter((issue) => !issue.pull_request);
+		chats = (data || []).filter(isChat);
 		renderChatList();
 	} catch (err) {
 		$("status-line").textContent = err.message;
 	}
+}
+
+async function refreshArchived() {
+	try {
+		const { data } = await gh(repoPath("/issues?state=closed&sort=updated&direction=desc&per_page=50"), {
+			conditional: true,
+		});
+		archived = (data || []).filter(isChat);
+		renderChatList();
+	} catch (err) {
+		toast(err.message);
+	}
+}
+
+// ---------- chat actions ----------
+
+const findChat = (number) =>
+	chats.find((chat) => chat.number === number) ||
+	archived.find((chat) => chat.number === number) ||
+	(current?.number === number ? current.issue : undefined);
+
+let actionsFor = null;
+
+function openActions(number) {
+	const issue = findChat(number);
+	if (!issue) return;
+	actionsFor = issue;
+	$("actions-title").textContent = issue.title;
+	const sheetEl = $("actions-sheet");
+	sheetEl.querySelector('[data-act="pin"]').textContent = hasLabel(issue, PIN_LABEL) ? "Unpin" : "Pin";
+	sheetEl.querySelector('[data-act="pin"]').hidden = issue.state === "closed";
+	sheetEl.querySelector('[data-act="archive"]').textContent = issue.state === "closed" ? "Restore" : "Archive";
+	sheetEl.hidden = false;
+	$("sheet-scrim").hidden = false;
+}
+function closeActions() {
+	$("actions-sheet").hidden = true;
+	$("sheet-scrim").hidden = $("options-sheet").hidden;
+}
+
+$("chat-menu-btn").addEventListener("click", () => current && openActions(current.number));
+
+/** Put a changed issue everywhere it shows. */
+function applyIssue(issue) {
+	chats = chats.filter((chat) => chat.number !== issue.number);
+	archived = archived.filter((chat) => chat.number !== issue.number);
+	if (isChat(issue)) {
+		if (issue.state === "open") chats.unshift(issue);
+		else archived.unshift(issue);
+	}
+	chats.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+	if (current?.number === issue.number) {
+		current.issue = issue;
+		current.title = issue.title;
+		$("chat-title").textContent = issue.title;
+	}
+	renderChatList();
+	updateChatMenu();
+}
+
+const refetchIssue = async (number) => (await gh(repoPath(`/issues/${number}`))).data;
+
+async function deleteChat(issue) {
+	// A real delete needs admin rights on the repo, which a phone token
+	// usually lacks; then the chat is emptied, closed and hidden instead.
+	try {
+		const { data } = await gh("/graphql", {
+			method: "POST",
+			accept: "application/json",
+			body: {
+				query: "mutation($id: ID!) { deleteIssue(input: { issueId: $id }) { clientMutationId } }",
+				variables: { id: issue.node_id },
+			},
+		});
+		if (!data?.errors?.length) return { ...issue, labels: [{ name: DELETED_LABEL }] };
+	} catch {}
+	const { comments } = await fetchAllComments(issue.number);
+	for (const comment of comments) {
+		await gh(repoPath(`/issues/comments/${comment.id}`), { method: "DELETE" });
+	}
+	await gh(repoPath(`/issues/${issue.number}/labels`), { method: "POST", body: { labels: [DELETED_LABEL] } });
+	return (
+		await gh(repoPath(`/issues/${issue.number}`), {
+			method: "PATCH",
+			body: { title: "Deleted chat", body: "", state: "closed" },
+		})
+	).data;
+}
+
+$("actions-sheet").addEventListener("click", async (event) => {
+	const button = event.target.closest("[data-act]");
+	if (!button || !actionsFor) return;
+	const issue = actionsFor;
+	const act = button.dataset.act;
+	closeActions();
+	try {
+		if (act === "rename") {
+			const title = prompt("Rename chat", issue.title)?.trim();
+			if (!title || title === issue.title) return;
+			applyIssue((await gh(repoPath(`/issues/${issue.number}`), { method: "PATCH", body: { title } })).data);
+		} else if (act === "pin") {
+			if (hasLabel(issue, PIN_LABEL)) {
+				await gh(repoPath(`/issues/${issue.number}/labels/${PIN_LABEL}`), { method: "DELETE" });
+			} else {
+				await gh(repoPath(`/issues/${issue.number}/labels`), { method: "POST", body: { labels: [PIN_LABEL] } });
+			}
+			applyIssue(await refetchIssue(issue.number));
+		} else if (act === "archive") {
+			const state = issue.state === "closed" ? "open" : "closed";
+			applyIssue((await gh(repoPath(`/issues/${issue.number}`), { method: "PATCH", body: { state } })).data);
+			toast(state === "closed" ? "Archived. Its minh session stops." : "Restored.");
+			if (state === "closed" && current?.number === issue.number) newChat();
+		} else if (act === "delete") {
+			if (!confirm(`Delete "${issue.title}"? Its messages are removed for good.`)) return;
+			toast("Deleting…");
+			applyIssue(await deleteChat(issue));
+			toast("Deleted.");
+			if (current?.number === issue.number) newChat();
+		}
+	} catch (err) {
+		toast(err.message);
+	}
+});
+
+function updateChatMenu() {
+	$("chat-menu-btn").hidden = !current;
+	const closed = current?.issue?.state === "closed";
+	$("composer").hidden = closed;
+	if (closed) $("status-line").textContent = "";
 }
 
 // ---------- chat ----------
@@ -236,6 +428,7 @@ function newChat() {
 	$("empty").hidden = false;
 	updateComposer();
 	updateOptionsLabel();
+	updateChatMenu();
 	renderChatList();
 	$("input").focus();
 }
@@ -243,7 +436,7 @@ function newChat() {
 async function openChat(number) {
 	clearTimeout(chatTimer);
 	pending = [];
-	const known = chats.find((chat) => chat.number === number);
+	const known = findChat(number);
 	current = { number, title: known?.title || `#${number}`, issue: known, comments: [] };
 	history.replaceState(null, "", `?chat=${number}`);
 	$("chat-title").textContent = current.title;
@@ -251,6 +444,7 @@ async function openChat(number) {
 	$("empty").hidden = true;
 	renderChatList();
 	updateComposer();
+	updateChatMenu();
 	await refreshChat(true);
 }
 
@@ -357,6 +551,7 @@ function renderMessages() {
 	}
 	updateComposer();
 	updateOptionsLabel();
+	updateChatMenu();
 	if (stick) scrollToBottom();
 }
 
@@ -559,7 +754,10 @@ async function openSheet(open) {
 }
 
 $("options-btn").addEventListener("click", () => openSheet(true));
-$("sheet-scrim").addEventListener("click", () => openSheet(false));
+$("sheet-scrim").addEventListener("click", () => {
+	openSheet(false);
+	closeActions();
+});
 $("opt-provider").addEventListener("change", (event) => {
 	fillModels(event.target.value, providerInfo(event.target.value)?.model);
 });
@@ -665,6 +863,7 @@ function start() {
 	$("setup").hidden = true;
 	$("app").hidden = false;
 	$("account-name").textContent = `${settings.login || ""} · ${settings.repo}`;
+	$("app-version").textContent = `App ${APP_VERSION} · updated ${APP_UPDATED}`;
 	refreshList();
 	loadCatalog();
 	clearInterval(listTimer);

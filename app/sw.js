@@ -1,5 +1,5 @@
 // Keeps the app opening offline and shows push notifications from the bridge.
-const CACHE = "minh-v2";
+const CACHE = "minh-v3";
 const SHELL = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -61,7 +61,7 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
 	event.notification.close();
 	const chat = event.notification.data?.chat;
-	const target = new URL(chat ? `./?chat=${chat}` : "./", self.registration.scope).href;
+	const target = new URL(chat ? `./?chat=${chat}&push=1` : "./?push=1", self.registration.scope).href;
 	event.waitUntil(
 		self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
 			for (const client of windows) {

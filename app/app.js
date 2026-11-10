@@ -4,7 +4,7 @@
 
 const $ = (id) => document.getElementById(id);
 // Shown at the bottom of the drawer. Bump with each release, with the ?v= in index.html.
-const APP_VERSION = "v4";
+const APP_VERSION = "v5";
 const APP_UPDATED = "2026-11-10";
 const STORE_KEY = "minh-mobile";
 const CHAT_POLL_MS = 3000;
@@ -20,14 +20,43 @@ function loadSettings() {
 		return {};
 	}
 }
+// A connection is one machine's bridge: its repo, token and picks. The active
+// one's fields also sit at the top level of `settings`, where the rest of the
+// app reads them; saving one of them updates the connection too.
+const PER_CONNECTION = ["name", "repo", "token", "apiBase", "login", "draftOptions", "typedFolders"];
+
 function saveSettings(next) {
 	settings = { ...settings, ...next };
+	const active = activeConnection();
+	if (active) {
+		for (const key of PER_CONNECTION) if (key in next) active[key] = next[key];
+	}
 	try {
 		localStorage.setItem(STORE_KEY, JSON.stringify(settings));
 	} catch {}
 }
+function activeConnection() {
+	return (settings.connections || []).find((c) => c.id === settings.activeId);
+}
+const repoName = (repo) => (repo || "").split("/")[1] || repo || "minh";
+
 let settings = loadSettings();
 if (!settings.deviceId) saveSettings({ deviceId: crypto.randomUUID().slice(0, 8) });
+// Older versions held one repo; it becomes the first connection.
+if (!settings.connections) {
+	const connections =
+		settings.repo && settings.token
+			? [
+					{
+						id: crypto.randomUUID().slice(0, 8),
+						name: repoName(settings.repo),
+						...Object.fromEntries(PER_CONNECTION.filter((k) => k in settings).map((k) => [k, settings[k]])),
+					},
+				]
+			: [];
+	saveSettings({ connections, activeId: connections[0]?.id });
+	if (connections[0]) saveSettings({ name: connections[0].name });
+}
 
 // ---------- GitHub ----------
 
@@ -155,18 +184,35 @@ $("setup-form").addEventListener("submit", async (event) => {
 	const repo = String(form.get("repo")).trim().replace(/^https:\/\/github\.com\//, "").replace(/\/+$/, "");
 	const token = String(form.get("token")).trim();
 	const apiBase = String(form.get("apiBase") || "").trim();
+	const name = String(form.get("name") || "").trim() || repoName(repo);
 	const error = $("setup-error");
 	error.hidden = true;
 	const button = event.target.querySelector("button[type=submit]");
 	button.disabled = true;
 	const previous = settings;
+	// Try the new repo and token without touching the saved connections yet.
 	settings = { ...settings, repo, token, apiBase };
 	try {
 		if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("Repo should look like your-name/minh-chat.");
 		const user = (await gh("/user")).data;
 		await gh(repoPath());
-		saveSettings({ repo, token, apiBase, login: user.login });
-		start();
+		settings = previous;
+		const connections = [...(settings.connections || [])];
+		// The same repo again replaces its connection (a new token, say).
+		const existing = connections.find((c) => c.repo.toLowerCase() === repo.toLowerCase());
+		const connection = {
+			...(existing || { id: crypto.randomUUID().slice(0, 8) }),
+			name,
+			repo,
+			token,
+			apiBase,
+			login: user.login,
+		};
+		saveSettings({
+			connections: existing ? connections.map((c) => (c.id === existing.id ? connection : c)) : [...connections, connection],
+		});
+		switchConnection(connection.id);
+		event.target.reset();
 	} catch (err) {
 		settings = previous;
 		error.textContent = err.message;
@@ -176,11 +222,99 @@ $("setup-form").addEventListener("submit", async (event) => {
 	}
 });
 
-$("signout-btn").addEventListener("click", () => {
-	if (!confirm("Remove the token from this phone?")) return;
-	saveSettings({ token: "", login: "" });
-	location.reload();
+function showSetup() {
+	$("app").hidden = true;
+	$("setup").hidden = false;
+	$("setup-error").hidden = true;
+	$("setup-back").hidden = !(settings.connections || []).length;
+	$("setup-form").name.focus();
+}
+$("setup-back").addEventListener("click", () => {
+	$("setup").hidden = true;
+	$("app").hidden = false;
 });
+
+// ---------- connections ----------
+
+/** Make another connection the active one and reload everything from its repo. */
+function switchConnection(id) {
+	const connection = (settings.connections || []).find((c) => c.id === id);
+	if (!connection) return;
+	const fields = Object.fromEntries(PER_CONNECTION.map((key) => [key, connection[key]]));
+	settings = { ...settings, activeId: id };
+	saveSettings(fields);
+	clearTimeout(chatTimer);
+	clearInterval(listTimer);
+	etags.clear();
+	chats = [];
+	archived = [];
+	current = null;
+	pending = [];
+	catalog = null;
+	showArchived = false;
+	$("search").value = "";
+	history.replaceState(null, "", location.pathname);
+	start();
+}
+
+function renderConnections() {
+	const list = settings.connections || [];
+	$("conn-list").innerHTML = list
+		.map(
+			(c) =>
+				`<button type="button" data-id="${escapeHtml(c.id)}"><b class="tick">${c.id === settings.activeId ? "✓" : ""}</b><span>${escapeHtml(c.name || repoName(c.repo))}<small>${escapeHtml(`${c.login || ""} · ${c.repo}`)}</small></span></button>`,
+		)
+		.join("");
+}
+function openConnections(open) {
+	if (open) renderConnections();
+	$("conn-sheet").hidden = !open;
+	$("sheet-scrim").hidden = !open;
+}
+
+$("conn-btn").addEventListener("click", () => openConnections(true));
+$("conn-sheet").addEventListener("click", (event) => {
+	const pick = event.target.closest("[data-id]");
+	if (pick) {
+		openConnections(false);
+		openDrawer(false);
+		if (pick.dataset.id !== settings.activeId) {
+			switchConnection(pick.dataset.id);
+			toast(`Switched to ${settings.name}.`);
+		}
+		return;
+	}
+	const action = event.target.closest("[data-conn]")?.dataset.conn;
+	if (!action) return;
+	openConnections(false);
+	if (action === "add") {
+		openDrawer(false);
+		showSetup();
+	} else if (action === "rename") {
+		const name = prompt("Name this connection", settings.name || "")?.trim();
+		if (name) {
+			saveSettings({ name });
+			updateConnectionLabel();
+		}
+	} else if (action === "remove") {
+		if (!confirm(`Remove "${settings.name}" from this phone? Its chats stay in ${settings.repo}.`)) return;
+		const rest = (settings.connections || []).filter((c) => c.id !== settings.activeId);
+		if (settings.pushRepo === settings.repo) saveSettings({ pushRepo: undefined });
+		settings = { ...settings, activeId: undefined };
+		saveSettings({ connections: rest });
+		if (rest.length) {
+			switchConnection(rest[0].id);
+		} else {
+			saveSettings(Object.fromEntries(PER_CONNECTION.map((key) => [key, undefined])));
+			location.replace(location.pathname);
+		}
+	}
+});
+
+function updateConnectionLabel() {
+	$("conn-name").textContent = settings.name || repoName(settings.repo);
+	$("account-name").textContent = `${settings.login || ""} · ${settings.repo}`;
+}
 
 // ---------- drawer ----------
 
@@ -794,6 +928,7 @@ $("options-btn").addEventListener("click", () => openSheet(true));
 $("sheet-scrim").addEventListener("click", () => {
 	openSheet(false);
 	closeActions();
+	openConnections(false);
 });
 $("opt-provider").addEventListener("change", (event) => {
 	fillModels(event.target.value, providerInfo(event.target.value)?.model);
@@ -858,7 +993,15 @@ async function updateNotifyButton() {
 	}
 	const registration = await navigator.serviceWorker.ready;
 	const subscription = await registration.pushManager.getSubscription();
-	button.textContent = subscription ? "Notifications on (send test)" : "Turn on notifications";
+	// Subscribed before connections existed: it belongs to the one showing.
+	if (subscription && !settings.pushRepo) saveSettings({ pushRepo: settings.repo });
+	const elsewhere = subscription && settings.pushRepo !== settings.repo;
+	const from = (settings.connections || []).find((c) => c.repo === settings.pushRepo);
+	button.textContent = !subscription
+		? "Turn on notifications"
+		: elsewhere
+			? `Notifications come from ${from?.name || settings.pushRepo}. Get them from here instead`
+			: "Notifications on (send test)";
 	button.disabled = false;
 }
 
@@ -866,7 +1009,7 @@ $("notify-btn").addEventListener("click", async () => {
 	try {
 		const registration = await navigator.serviceWorker.ready;
 		let subscription = await registration.pushManager.getSubscription();
-		if (subscription) {
+		if (subscription && settings.pushRepo === settings.repo) {
 			await registration.showNotification("minh", { body: "Notifications work on this device.", icon: "icon-192.png", badge: "icon-192.png" });
 			return;
 		}
@@ -874,12 +1017,16 @@ $("notify-btn").addEventListener("click", async () => {
 		if (permission !== "granted") throw new Error("Notifications were not allowed.");
 		const key = (await gh(repoPath("/contents/.minh/vapid-public-key.txt"), { accept: "application/vnd.github.raw" })).data;
 		if (!key) throw new Error("No key in the repo yet. Start the bridge once first.");
+		// One browser takes push from one bridge (each signs with its own key):
+		// moving here drops the other; its bridge forgets this phone on its own.
+		if (subscription) await subscription.unsubscribe();
 		subscription = await registration.pushManager.subscribe({
 			userVisibleOnly: true,
 			applicationServerKey: urlBase64ToUint8Array(String(key).trim()),
 		});
 		await saveSubscription(subscription);
-		toast("Notifications on.");
+		saveSettings({ pushRepo: settings.repo });
+		toast(`Notifications on for ${settings.name || settings.repo}.`);
 	} catch (err) {
 		toast(err.message === "Repo not found, or the token cannot see it." ? "No key in the repo yet. Start the bridge once first." : err.message);
 	}
@@ -910,7 +1057,7 @@ document.addEventListener("visibilitychange", () => {
 function start() {
 	$("setup").hidden = true;
 	$("app").hidden = false;
-	$("account-name").textContent = `${settings.login || ""} · ${settings.repo}`;
+	updateConnectionLabel();
 	$("app-version").textContent = `App ${APP_VERSION} · updated ${APP_UPDATED}`;
 	refreshList();
 	loadCatalog();
@@ -925,15 +1072,27 @@ function start() {
 if ("serviceWorker" in navigator) {
 	navigator.serviceWorker.register("sw.js").catch(() => {});
 	navigator.serviceWorker.addEventListener("message", (event) => {
-		if (event.data?.type === "open-chat") openChat(Number(event.data.chat));
+		if (event.data?.type !== "open-chat") return;
+		// The notification came from the connection notifications are set up for.
+		const from = (settings.connections || []).find((c) => c.repo === settings.pushRepo);
+		if (from && from.id !== settings.activeId) switchConnection(from.id);
+		openChat(Number(event.data.chat));
 	});
+}
+
+// Opened from a notification: it came from the connection notifications are
+// set up for, which may not be the one showing.
+const fromPush = new URLSearchParams(location.search).get("push") === "1";
+const pushConnection = (settings.connections || []).find((c) => c.repo === settings.pushRepo);
+if (fromPush && pushConnection && pushConnection.id !== settings.activeId) {
+	const chat = new URLSearchParams(location.search).get("chat");
+	settings = { ...settings, activeId: pushConnection.id };
+	saveSettings(Object.fromEntries(PER_CONNECTION.map((key) => [key, pushConnection[key]])));
+	if (chat) history.replaceState(null, "", `?chat=${chat}`);
 }
 
 if (settings.token && settings.repo) {
 	start();
 } else {
-	$("setup").hidden = false;
-	const form = $("setup-form");
-	if (settings.repo) form.repo.value = settings.repo;
-	if (settings.apiBase) form.apiBase.value = settings.apiBase;
+	showSetup();
 }

@@ -14,7 +14,7 @@
 	<link rel="manifest" href="manifest.webmanifest" />
 	<link rel="icon" href="icon.svg" type="image/svg+xml" />
 	<link rel="apple-touch-icon" href="icon-180.png" />
-	<link rel="stylesheet" href="style.css?v=4" />
+	<link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
 	<!-- First run: where the chats live. -->
@@ -23,11 +23,14 @@
 			<div class="brand"><img src="icon.svg" alt="" width="40" height="40" /><h1>minh</h1></div>
 			<p>Chats live in a private GitHub repo that your minh bridge watches.</p>
 			<form id="setup-form">
+				<label>Name
+					<input name="name" placeholder="This PC, Server…" autocomplete="off" />
+				</label>
 				<label>Chat repo
 					<input name="repo" placeholder="your-name/minh-chat" autocomplete="off" autocapitalize="off" spellcheck="false" required />
 				</label>
 				<label>GitHub token
-					<input name="token" type="password" placeholder="github_pat_â€¦" autocomplete="off" required />
+					<input name="token" type="password" placeholder="github_pat_…" autocomplete="off" required />
 				</label>
 				<p class="hint">A fine-grained token from <b>your</b> account, for this one repo: Issues and Contents, read and write. It stays on this phone.</p>
 				<details class="advanced">
@@ -38,6 +41,7 @@
 				</details>
 				<p id="setup-error" class="error" hidden></p>
 				<button type="submit" class="primary">Connect</button>
+				<button type="button" id="setup-back" class="link center" hidden>Back</button>
 			</form>
 		</div>
 	</section>
@@ -53,7 +57,10 @@
 			<div class="drawer-foot">
 				<button id="archived-btn" class="link">Archived chats</button>
 				<button id="notify-btn" class="link">Turn on notifications</button>
-				<div class="account"><span id="account-name"></span><button id="signout-btn" class="link">Sign out</button></div>
+				<button id="conn-btn" class="conn" aria-label="Switch connection">
+					<span class="conn-text"><b id="conn-name"></b><small id="account-name"></small></span>
+					<svg viewBox="0 0 24 24" width="16" height="16"><path d="M8 9l4-4 4 4M8 15l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+				</button>
 				<p id="app-version" class="app-version"></p>
 			</div>
 		</aside>
@@ -140,7 +147,7 @@
 		<button type="submit" class="primary">Done</button>
 	</form>
 
-	<!-- One chat's actions: from the â‹¯ button, or a long press in the list. -->
+	<!-- One chat's actions: from the ⋯ button, or a long press in the list. -->
 	<div id="actions-sheet" class="sheet actions" hidden>
 		<div class="sheet-grip"></div>
 		<h3 id="actions-title"></h3>
@@ -150,8 +157,18 @@
 		<button type="button" data-act="delete" class="danger">Delete</button>
 	</div>
 
+	<!-- Connections: one per machine's bridge (each its own repo). -->
+	<div id="conn-sheet" class="sheet actions" hidden>
+		<div class="sheet-grip"></div>
+		<h3>Connections</h3>
+		<div id="conn-list" class="conn-list"></div>
+		<button type="button" data-conn="add">+ Add a connection</button>
+		<button type="button" data-conn="rename">Rename this one</button>
+		<button type="button" data-conn="remove" class="danger">Remove this one from the phone</button>
+	</div>
+
 	<div id="toast" class="toast" hidden></div>
 	<!-- Bump ?v= with each app change so a cached old file is never paired with a new page. -->
-	<script type="module" src="app.js?v=4"></script>
+	<script type="module" src="app.js?v=5"></script>
 </body>
 </html>

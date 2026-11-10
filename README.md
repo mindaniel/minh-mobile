@@ -15,6 +15,8 @@ Each person (each Windows account on the server) runs their own bridge, with the
 
 ## One-time setup (per person)
 
+**Easiest: type `/setupweb` in the minh terminal.** It is built into clinemin. It walks through the repo and the token, checks them, starts the bridge in the background and shows the phone link as a QR code. Running it again lets you start, stop or restart the bridge. The steps below are the manual way, using the standalone bridge in this repo.
+
 1. **Chat repo:** on your main GitHub account, create a **private** repo, for example `minh-chat`. Leave it empty.
 2. **Bridge account (optional):** if the bridge should post as a second account, add that account under the repo's Settings > Collaborators and give it write access. Otherwise the bridge can use your main account. It tells its own comments apart by a hidden marker.
 3. **Tokens:** create them at github.com > Settings > Developer settings.
@@ -69,6 +71,8 @@ Each person (each Windows account on the server) runs their own bridge, with the
   - **Archive** it. This closes the issue, and the bridge stops its minh session. Archived chats are under **Archived chats** in the drawer; **Restore** brings one back.
   - **Delete** it. A real delete needs admin rights on the repo. With the phone token, the chat's messages are removed and the issue is closed and hidden instead.
 - **Search:** the box at the top of the drawer filters chats by title.
+- **Several machines:** give each machine's bridge its own repo, such as `minh-chat` for the PC and `minh-chat-server` for the server. On the phone, tap the connection at the bottom of the drawer to switch, add, rename or remove connections. Each connection keeps its own model and folder picks.
+  - **Notifications:** a phone gets them from one connection at a time, because each bridge signs them with its own key. The drawer shows where they come from; tap it to move them to the connection you're looking at.
 - **Delays:** about 3 to 6 seconds each way. Replies grow in steps every few seconds, not word by word.
 - **Restarts:** the bridge picks up where it left off. A chat whose session stopped is revived from its transcript.
 - **Open in minh:** a chat still open in a minh terminal window can't be continued from the phone until you close it there.

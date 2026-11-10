@@ -158,14 +158,42 @@ input, textarea { font: inherit; color: inherit; }
 /* ---------- composer ---------- */
 .composer { padding: 6px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--bg); }
 .composer-box {
-	max-width: 760px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
-	background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 8px 8px 8px 16px;
+	max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 4px;
+	background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 10px 8px 8px 16px;
 	box-shadow: var(--shadow);
 }
 .composer textarea {
-	flex: 1; border: 0; outline: 0; resize: none; background: transparent; max-height: 40dvh;
-	padding: 6px 0; line-height: 1.4; font-size: 16px;
+	border: 0; outline: 0; resize: none; background: transparent; max-height: 40dvh;
+	padding: 4px 8px 4px 0; line-height: 1.4; font-size: 16px;
 }
+.composer-row { display: flex; align-items: center; gap: 8px; }
+.chip {
+	margin-right: auto; display: inline-flex; align-items: center; gap: 4px; max-width: 70%;
+	padding: 6px 10px; margin-left: -8px; border-radius: 999px; font-size: 13px; color: var(--muted);
+}
+.chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip:active { background: var(--bubble); }
+
+/* ---------- settings sheet ---------- */
+.sheet-scrim { z-index: 24; }
+.sheet {
+	position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; margin: 0 auto; max-width: 520px;
+	background: var(--surface); border-radius: 20px 20px 0 0; box-shadow: var(--shadow);
+	padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 14px;
+	max-height: 85dvh; overflow-y: auto;
+}
+.sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); justify-self: center; }
+.sheet h3 { margin: 0; font-size: 17px; }
+.sheet label, .sheet .field { display: grid; gap: 6px; font-size: 14px; font-weight: 500; }
+.sheet select, .sheet input {
+	width: 100%; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line);
+	background: var(--bg); color: var(--text); font-size: 16px; outline: none;
+}
+.sheet select:focus, .sheet input:focus { border-color: var(--accent); }
+.sheet .hint { color: var(--muted); margin: 0; }
+.segmented { display: flex; background: var(--bubble); border-radius: 12px; padding: 3px; }
+.segmented button { flex: 1; padding: 8px; border-radius: 9px; font-size: 14px; color: var(--muted); }
+.segmented button.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
 .send {
 	width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none;
 	background: var(--accent); color: var(--accent-text);

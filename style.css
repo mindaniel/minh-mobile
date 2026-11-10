@@ -122,6 +122,19 @@ input, textarea { font: inherit; color: inherit; }
 .account { display: flex; justify-content: space-between; color: var(--muted); }
 .link { color: var(--accent); font-size: 14px; text-align: left; }
 .app-version { margin: 0; font-size: 11px; color: var(--muted); }
+.conn {
+	display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+	padding: 8px 10px; border-radius: 10px; background: var(--bubble);
+}
+.conn-text { flex: 1; min-width: 0; display: grid; }
+.conn-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conn-text small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conn-list { display: grid; }
+.conn-list button { display: flex; align-items: center; gap: 10px; }
+.conn-list button span { flex: 1; min-width: 0; display: grid; }
+.conn-list small { color: var(--muted); font-size: 12px; }
+.conn-list .tick { color: var(--accent); width: 16px; }
+.link.center { text-align: center; }
 
 /* ---------- chat ---------- */
 .scroller { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 16px; }

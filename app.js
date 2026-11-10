@@ -4,7 +4,7 @@
 
 const $ = (id) => document.getElementById(id);
 // Shown at the bottom of the drawer. Bump with each release, with the ?v= in index.html.
-const APP_VERSION = "v3";
+const APP_VERSION = "v4";
 const APP_UPDATED = "2026-11-10";
 const STORE_KEY = "minh-mobile";
 const CHAT_POLL_MS = 3000;
@@ -685,8 +685,11 @@ function chatOptions() {
 	return options;
 }
 
+const folderName = (path) => (path || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+
 function describeOptions(options) {
 	const bits = [modelName(options.provider, options.model)];
+	if (options.cwd) bits.push(folderName(options.cwd));
 	if (options.mode === "plan") bits.push("Plan");
 	if (options.autoApprove === false) bits.push("Ask me");
 	return bits.join(" · ");
@@ -697,7 +700,8 @@ function updateOptionsLabel() {
 }
 
 const sheet = $("options-sheet");
-const OTHER = "\u0000other";
+// Value of the "Other…" entries (model, folder): one no real model id or path uses.
+const OTHER = "::other::";
 
 function fillModels(provider, model) {
 	const select = $("opt-model");
@@ -717,6 +721,38 @@ function fillModels(provider, model) {
 	select.value = known ? model : model ? OTHER : models[0].id;
 	text.hidden = select.value !== OTHER;
 	text.value = known ? "" : model || "";
+}
+
+/** The bridge's folders, plus ones typed on this device before. */
+function fillFolders(cwd) {
+	const select = $("opt-folder");
+	const text = $("opt-folder-text");
+	const seen = new Set();
+	const folders = [...(catalog?.folders || []), ...(settings.typedFolders || [])].filter((path) => {
+		const key = path.toLowerCase();
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+	const known = cwd && folders.some((path) => path.toLowerCase() === cwd.toLowerCase());
+	if (cwd && !known) folders.unshift(cwd);
+	select.innerHTML =
+		folders
+			.map((path) => `<option value="${escapeHtml(path)}">${escapeHtml(`${folderName(path)} — ${path}`)}</option>`)
+			.join("") + `<option value="${OTHER}">Other folder…</option>`;
+	select.value = cwd ? folders.find((path) => path.toLowerCase() === cwd.toLowerCase()) : folders[0] || OTHER;
+	text.value = "";
+	showFolderText();
+}
+
+function showFolderText() {
+	const other = $("opt-folder").value === OTHER;
+	$("opt-folder-text").hidden = !other;
+	$("folder-new").hidden = !other;
+	const base = catalog?.defaults?.cwd;
+	$("folder-new-hint").textContent = base
+		? `A name alone, like "my-app", means a folder inside ${base}.`
+		: `A name alone means a folder inside the bridge's default folder.`;
 }
 
 function setSegment(name, value) {
@@ -744,6 +780,7 @@ async function openSheet(open) {
 		.join("");
 	$("opt-provider").value = options.provider || providers[0]?.id || "";
 	fillModels($("opt-provider").value, options.model);
+	fillFolders(options.cwd);
 	setSegment("mode", options.mode || "act");
 	setSegment("autoApprove", options.autoApprove ?? true);
 	$("sheet-hint").textContent = !catalog
@@ -761,6 +798,10 @@ $("sheet-scrim").addEventListener("click", () => {
 $("opt-provider").addEventListener("change", (event) => {
 	fillModels(event.target.value, providerInfo(event.target.value)?.model);
 });
+$("opt-folder").addEventListener("change", (event) => {
+	showFolderText();
+	if (event.target.value === OTHER) $("opt-folder-text").focus();
+});
 $("opt-model").addEventListener("change", (event) => {
 	$("opt-model-text").hidden = event.target.value !== OTHER;
 	if (event.target.value === OTHER) $("opt-model-text").focus();
@@ -774,9 +815,16 @@ sheet.addEventListener("submit", async (event) => {
 	event.preventDefault();
 	const select = $("opt-model");
 	const model = (select.hidden || select.value === OTHER ? $("opt-model-text").value : select.value).trim();
+	const folderSelect = $("opt-folder");
+	const cwd = (folderSelect.value === OTHER ? $("opt-folder-text").value : folderSelect.value).trim();
+	if (cwd && folderSelect.value === OTHER) {
+		saveSettings({ typedFolders: [cwd, ...(settings.typedFolders || []).filter((p) => p !== cwd)].slice(0, 10) });
+	}
 	const picked = {
 		...($("opt-provider").value ? { provider: $("opt-provider").value } : {}),
 		...(model ? { model } : {}),
+		...(cwd ? { cwd } : {}),
+		...(cwd && folderSelect.value === OTHER && $("opt-folder-create").checked ? { createFolder: true } : {}),
 		mode: getSegment("mode") || "act",
 		autoApprove: getSegment("autoApprove") !== "false",
 	};

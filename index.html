@@ -14,7 +14,7 @@
 	<link rel="manifest" href="manifest.webmanifest" />
 	<link rel="icon" href="icon.svg" type="image/svg+xml" />
 	<link rel="apple-touch-icon" href="icon-180.png" />
-	<link rel="stylesheet" href="style.css?v=3" />
+	<link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
 	<!-- First run: where the chats live. -->
@@ -27,7 +27,7 @@
 					<input name="repo" placeholder="your-name/minh-chat" autocomplete="off" autocapitalize="off" spellcheck="false" required />
 				</label>
 				<label>GitHub token
-					<input name="token" type="password" placeholder="github_pat_…" autocomplete="off" required />
+					<input name="token" type="password" placeholder="github_pat_â€¦" autocomplete="off" required />
 				</label>
 				<p class="hint">A fine-grained token from <b>your</b> account, for this one repo: Issues and Contents, read and write. It stays on this phone.</p>
 				<details class="advanced">
@@ -114,6 +114,14 @@
 			<select id="opt-model"></select>
 			<input id="opt-model-text" placeholder="Model id" autocomplete="off" autocapitalize="off" spellcheck="false" hidden />
 		</label>
+		<label>Folder
+			<select id="opt-folder"></select>
+			<input id="opt-folder-text" placeholder="new-project or C:\full\path" autocomplete="off" autocapitalize="off" spellcheck="false" hidden />
+		</label>
+		<div id="folder-new" class="folder-new" hidden>
+			<label class="check"><input id="opt-folder-create" type="checkbox" checked /> Create it if missing</label>
+			<p id="folder-new-hint" class="hint"></p>
+		</div>
 		<div class="field">
 			<span>Mode</span>
 			<div class="segmented" data-name="mode">
@@ -132,7 +140,7 @@
 		<button type="submit" class="primary">Done</button>
 	</form>
 
-	<!-- One chat's actions: from the ⋯ button, or a long press in the list. -->
+	<!-- One chat's actions: from the â‹¯ button, or a long press in the list. -->
 	<div id="actions-sheet" class="sheet actions" hidden>
 		<div class="sheet-grip"></div>
 		<h3 id="actions-title"></h3>
@@ -144,6 +152,6 @@
 
 	<div id="toast" class="toast" hidden></div>
 	<!-- Bump ?v= with each app change so a cached old file is never paired with a new page. -->
-	<script type="module" src="app.js?v=3"></script>
+	<script type="module" src="app.js?v=4"></script>
 </body>
 </html>

@@ -10,6 +10,26 @@ import { pathToFileURL } from "node:url";
 import type * as CoreSdk from "@cline/core";
 import type * as SharedSdk from "@cline/shared";
 import type { BridgeConfig } from "./config";
+import type { ChatOptions } from "./protocol";
+
+export interface ResolvedOptions {
+	provider: string;
+	model: string;
+	mode: "act" | "plan";
+	autoApprove: boolean;
+}
+
+/** Published to .minh/options.json for the phone's model picker. */
+export interface OptionsCatalog {
+	defaults?: ResolvedOptions;
+	providers: Array<{
+		id: string;
+		name: string;
+		/** The model minh last used with this provider. */
+		model?: string;
+		models: Array<{ id: string; name: string }>;
+	}>;
+}
 
 type Core = typeof CoreSdk;
 type Shared = typeof SharedSdk;
@@ -90,18 +110,67 @@ export class Hub {
 		return () => this.listeners.delete(listener);
 	}
 
-	private async startRequest(): Promise<StartRequest> {
-		const { core, shared } = this.sdk;
-		const settings = new core.ProviderSettingsManager().getLastUsedProviderSettings({
-			isClinePassEnabled: true,
-		});
-		const provider = this.config.provider || settings?.provider;
-		const model = this.config.model || settings?.model;
+	/**
+	 * What a chat runs with: its own picks first, then config.json, then the
+	 * provider/model minh used last. A provider picked without a model gets
+	 * the model minh last used with it.
+	 */
+	resolve(options: ChatOptions = {}): ResolvedOptions {
+		const manager = new this.sdk.core.ProviderSettingsManager();
+		const last = manager.getLastUsedProviderSettings({ isClinePassEnabled: true });
+		const provider = options.provider || this.config.provider || last?.provider;
+		let model = options.model;
+		if (!model && provider) {
+			model =
+				provider === (this.config.provider || last?.provider)
+					? this.config.model || last?.model
+					: manager.getProviderSettings(provider)?.model;
+		}
 		if (!provider || !model) {
 			throw new Error(
-				'No provider/model yet. Chat once in minh on this account, or set "provider" and "model" in config.json.',
+				options.provider
+					? `No model picked for ${options.provider}. Pick one in the app.`
+					: 'No provider/model yet. Chat once in minh on this account, or set "provider" and "model" in config.json.',
 			);
 		}
+		return {
+			provider,
+			model,
+			mode: options.mode ?? "act",
+			autoApprove: options.autoApprove ?? this.config.autoApproveTools,
+		};
+	}
+
+	/**
+	 * What the phone can pick from: the providers set up in minh on this
+	 * account, with their models. Never includes keys.
+	 */
+	async catalog(): Promise<OptionsCatalog> {
+		const { core } = this.sdk;
+		const manager = new core.ProviderSettingsManager();
+		const { providers } = await core.listLocalProviders(manager, { isClinePassEnabled: true });
+		let defaults: ResolvedOptions | undefined;
+		try {
+			defaults = this.resolve();
+		} catch {}
+		return {
+			defaults,
+			providers: providers
+				.filter((provider) => provider.enabled || provider.id === defaults?.provider)
+				.map((provider) => ({
+					id: provider.id,
+					name: provider.name,
+					model: manager.getProviderSettings(provider.id)?.model || provider.defaultModelId,
+					models: (provider.modelList ?? [])
+						.slice(0, 300)
+						.map((model) => ({ id: model.id, name: model.name || model.id })),
+				})),
+		};
+	}
+
+	private async startRequest(options?: ChatOptions): Promise<StartRequest> {
+		const { core, shared } = this.sdk;
+		const { provider, model, mode, autoApprove } = this.resolve(options);
 		const cwd = this.config.cwd;
 		// The same prompt minh builds for a terminal session (apps/cli/src/runtime/prompt.ts).
 		const systemPrompt = shared.buildClineSystemPrompt({
@@ -119,7 +188,7 @@ export class Hub {
 			cwd,
 			provider,
 			model,
-			mode: "act",
+			mode,
 			// No key: the hub uses the one minh saved for this provider. Must be
 			// undefined, not "": the hub falls back with `??`.
 			apiKey: undefined,
@@ -127,15 +196,33 @@ export class Hub {
 			enableTools: true,
 			enableSpawn: true,
 			enableTeams: true,
-			autoApproveTools: this.config.autoApproveTools,
+			autoApproveTools: autoApprove,
 			source: "minh-mobile",
 			interactive: true,
 		} as StartRequest;
 	}
 
-	async startSession(title: string, issue: number): Promise<string> {
-		const request = await this.startRequest();
-		const started = await this.client.startRuntimeSession(request);
+	/**
+	 * A new session for a chat. With `from`, it carries that session's
+	 * conversation over (used to switch model or tool approval mid-chat; the
+	 * old session is let go).
+	 */
+	async startSession(
+		title: string,
+		issue: number,
+		options?: ChatOptions,
+		from?: string,
+	): Promise<string> {
+		const request = await this.startRequest(options);
+		let resume: { initialMessages: Awaited<ReturnType<SessionClient["readMessages"]>> } | undefined;
+		if (from) {
+			resume = { initialMessages: await this.client.readMessages(from) };
+			await this.client.stopRuntimeSession(from).catch(() => undefined);
+		}
+		const started = await this.client.startRuntimeSession(
+			request,
+			resume as Parameters<SessionClient["startRuntimeSession"]>[1],
+		);
 		await this.client
 			.updateSession({
 				sessionId: started.sessionId,
@@ -150,7 +237,7 @@ export class Hub {
 	 * started back up from its transcript (after a hub or bridge restart).
 	 * Returns false when it no longer exists.
 	 */
-	async ensureLive(sessionId: string): Promise<boolean> {
+	async ensureLive(sessionId: string, options?: ChatOptions): Promise<boolean> {
 		const row = (await this.client.listSessions({ limit: 500 })).find(
 			(candidate) => candidate.sessionId === sessionId,
 		);
@@ -161,25 +248,25 @@ export class Hub {
 				`this chat is open in a minh window (pid ${row.heldByPid}). Close it there first.`,
 			);
 		}
-		const request = await this.startRequest();
+		// Back up with what the chat picked, or else what the session last ran with.
 		const meta = row.metadata ?? {};
-		const provider = typeof meta.provider === "string" ? meta.provider : request.provider;
-		await this.client.startRuntimeSession(
-			{
-				...request,
-				provider,
-				model: typeof meta.model === "string" ? meta.model : request.model,
-			},
-			{ sessionId, initialMessages: await this.client.readMessages(sessionId) },
-		);
+		const fallback: ChatOptions = {
+			provider: typeof meta.provider === "string" ? meta.provider : undefined,
+			model: typeof meta.model === "string" ? meta.model : undefined,
+		};
+		const request = await this.startRequest(options?.provider ? options : { ...options, ...fallback });
+		await this.client.startRuntimeSession(request, {
+			sessionId,
+			initialMessages: await this.client.readMessages(sessionId),
+		});
 		return true;
 	}
 
 	/** Runs one turn and resolves when it ends. Progress arrives through onEvent. */
-	async send(sessionId: string, prompt: string): Promise<TurnResult> {
+	async send(sessionId: string, prompt: string, mode: "act" | "plan" = "act"): Promise<TurnResult> {
 		const reply = await this.client.sendSessionInput(
 			sessionId,
-			{ prompt, mode: "act" },
+			{ prompt, mode },
 			{ timeoutMs: null },
 		);
 		const result = reply.result as

@@ -6,7 +6,15 @@
 import { type BridgeConfig, readJson, statePath, writeJson } from "./config";
 import { type Comment, GitHub, type Issue, issueNumberFromUrl, RateLimitedError } from "./github";
 import { Hub, type HubEvent } from "./hub";
-import { chatTitle, parseCommand, readMarker, withMarker } from "./protocol";
+import {
+	type ChatOptions,
+	chatTitle,
+	parseCommand,
+	readMarker,
+	readOptions,
+	stripOptions,
+	withMarker,
+} from "./protocol";
 import { Push } from "./push";
 import { ReplyWriter, summarizeToolInput } from "./reply";
 
@@ -16,10 +24,22 @@ export interface BridgeState {
 	lastCommentId: number;
 	commentsSince: string;
 	/** Issue number -> its minh session. */
-	chats: Record<string, { sessionId?: string; title?: string }>;
+	chats: Record<string, ChatState>;
 	/** Issues whose opening message has been sent. */
 	openedIssues: number[];
 }
+
+interface ChatState {
+	sessionId?: string;
+	title?: string;
+	/** What the phone picked for this chat. */
+	options?: ChatOptions;
+	/** provider|model|autoApprove the session runs with; a change starts a new one. */
+	applied?: string;
+}
+
+export const OPTIONS_FILE = ".minh/options.json";
+const OPTIONS_REFRESH_MS = 10 * 60_000;
 
 export function freshState(now = new Date()): BridgeState {
 	return {
@@ -91,13 +111,32 @@ export class Bridge {
 		);
 		await this.hub.connect();
 		this.hub.onEvent((event) => this.onHubEvent(event));
+		await this.publishOptions();
 		console.log(`minh-mobile: watching ${this.config.repo} (hub ${this.hub.hubUrl})`);
+	}
+
+	private optionsPublishedAt = 0;
+
+	/** Lists the providers and models the phone can pick from (no keys). */
+	async publishOptions(): Promise<void> {
+		this.optionsPublishedAt = Date.now();
+		try {
+			const catalog = await this.hub.catalog();
+			await this.github.writeFile(
+				OPTIONS_FILE,
+				`${JSON.stringify(catalog, null, 1)}\n`,
+				"minh: models the phone can pick",
+			);
+		} catch (error) {
+			console.warn("could not publish the model list:", (error as Error).message);
+		}
 	}
 
 	async run(): Promise<void> {
 		await this.start();
 		while (!this.stopped) {
 			try {
+				if (Date.now() - this.optionsPublishedAt > OPTIONS_REFRESH_MS) await this.publishOptions();
 				await this.tick();
 			} catch (error) {
 				if (error instanceof RateLimitedError) {
@@ -144,8 +183,13 @@ export class Bridge {
 		if (this.state.openedIssues.includes(issue.number)) return;
 		if (issue.created_at < this.state.startedAt) return;
 		this.state.openedIssues.push(issue.number);
-		const text = issue.body?.trim() || issue.title;
-		this.state.chats[issue.number] = { ...this.state.chats[issue.number], title: issue.title };
+		const options = readOptions(issue.body);
+		const text = stripOptions(issue.body ?? "").trim() || issue.title;
+		this.state.chats[issue.number] = {
+			...this.state.chats[issue.number],
+			title: issue.title,
+			...(options ? { options } : {}),
+		};
 		this.enqueue(issue.number, text);
 	}
 
@@ -156,6 +200,13 @@ export class Bridge {
 		if (readMarker(comment.body) || !this.allowed(comment.user.login)) return;
 		const issue = issueNumberFromUrl(comment.issue_url);
 		if (issue === undefined) return;
+		const options = readOptions(comment.body);
+		if (options) {
+			// Settings only: the next message runs with them.
+			const chat = (this.state.chats[issue] ??= {});
+			chat.options = { ...chat.options, ...options };
+			return;
+		}
 		const command = parseCommand(comment.body);
 		if (command) {
 			void this.runCommand(issue, command).catch((error) =>
@@ -191,15 +242,22 @@ export class Bridge {
 		await reply.start();
 		let sessionId: string | undefined;
 		try {
+			const resolved = this.hub.resolve(chat.options);
+			const key = `${resolved.provider}|${resolved.model}|${resolved.autoApprove}`;
+			const title = chat.title || chatTitle(text);
 			sessionId = chat.sessionId;
-			if (sessionId && !(await this.hub.ensureLive(sessionId))) sessionId = undefined;
+			if (sessionId && !(await this.hub.ensureLive(sessionId, chat.options))) sessionId = undefined;
 			if (!sessionId) {
-				sessionId = await this.hub.startSession(chat.title || chatTitle(text), issue);
-				chat.sessionId = sessionId;
-				this.save();
+				sessionId = await this.hub.startSession(title, issue, chat.options);
+			} else if ((chat.applied ?? key) !== key) {
+				// Model or tool approval changed: same conversation, new session.
+				sessionId = await this.hub.startSession(title, issue, chat.options, sessionId);
 			}
+			chat.sessionId = sessionId;
+			chat.applied = key;
+			this.save();
 			this.active.set(sessionId, { issue, reply });
-			const result = await this.hub.send(sessionId, text);
+			const result = await this.hub.send(sessionId, text, resolved.mode);
 			const state =
 				result.finishReason === "aborted" ? "stopped" : result.error ? "error" : "done";
 			await reply.finish(state, result.text, result.error);

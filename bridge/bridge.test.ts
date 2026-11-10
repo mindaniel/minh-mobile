@@ -7,7 +7,7 @@ import { Bridge, stableSince } from "./bridge";
 import type { BridgeConfig } from "./config";
 import { GitHub } from "./github";
 import type { Hub, HubEvent, TurnResult } from "./hub";
-import { parseCommand, readMarker, withMarker } from "./protocol";
+import { type ChatOptions, parseCommand, readMarker, readOptions, withMarker, withOptions } from "./protocol";
 import { Push } from "./push";
 
 /** Stands in for the minh hub: replies by echoing, and can be told to stream or ask. */
@@ -27,15 +27,30 @@ class FakeHub {
 	emit(sessionId: string, eventType: string, payload: Record<string, unknown>) {
 		for (const listener of this.listeners) listener({ sessionId, eventType, payload });
 	}
-	async startSession() {
+	started: Array<{ id: string; options?: ChatOptions; from?: string }> = [];
+	modes: string[] = [];
+	resolve(options: ChatOptions = {}) {
+		return {
+			provider: options.provider ?? "gemini-web",
+			model: options.model ?? "gemini-pro",
+			mode: options.mode ?? "act",
+			autoApprove: options.autoApprove ?? true,
+		};
+	}
+	async catalog() {
+		return { defaults: this.resolve(), providers: [{ id: "gemini-web", name: "Gemini", models: [] }] };
+	}
+	async startSession(_title: string, _issue: number, options?: ChatOptions, from?: string) {
 		const id = `s${this.sessions.size + 1}`;
-		this.sessions.set(id, []);
+		this.sessions.set(id, from ? [...this.sessions.get(from)!] : []);
+		this.started.push({ id, options, from });
 		return id;
 	}
 	async ensureLive(id: string) {
 		return this.sessions.has(id);
 	}
-	async send(sessionId: string, prompt: string): Promise<TurnResult> {
+	async send(sessionId: string, prompt: string, mode = "act"): Promise<TurnResult> {
+		this.modes.push(mode);
 		this.sessions.get(sessionId)!.push(prompt);
 		if (this.script) return this.script(sessionId, prompt);
 		this.emit(sessionId, "runtime.chat.text_delta", { text: `echo: ${prompt}` });
@@ -190,6 +205,42 @@ describe("bridge", () => {
 		expect(readMarker(fake.comments.find((c) => c.id === ask.id)!.body)).toMatchObject({ state: "approved" });
 	});
 
+	test("publishes the model list for the phone", async () => {
+		await bridge.start();
+		const file = fake.files.get(".minh/options.json");
+		const catalog = JSON.parse(Buffer.from(file!.content, "base64").toString("utf-8"));
+		expect(catalog.defaults).toMatchObject({ provider: "gemini-web", model: "gemini-pro" });
+		expect(catalog.providers[0].id).toBe("gemini-web");
+	});
+
+	test("chat options: picked at the start, switched mid-chat", async () => {
+		await bridge.start();
+		await you.write("POST", `/repos/${fake.repo}/issues`, {
+			title: "a",
+			body: withOptions({ provider: "deepseek-web", model: "v3", mode: "plan" }, "one"),
+		});
+		await poll();
+		expect(hub.started[0].options).toEqual({ provider: "deepseek-web", model: "v3", mode: "plan" });
+		expect(hub.sessions.get("s1")).toEqual(["one"]);
+		expect(hub.modes).toEqual(["plan"]);
+
+		// Mode alone: same session.
+		await you.addComment(1, withOptions({ mode: "act" }, "Mode: act"));
+		await you.addComment(1, "two");
+		await poll();
+		expect(hub.sessions.size).toBe(1);
+		expect(hub.modes).toEqual(["plan", "act"]);
+
+		// A new model: a new session that carries the conversation over.
+		await you.addComment(1, withOptions({ provider: "gemini-web", model: "flash" }, "Model: flash"));
+		await you.addComment(1, "three");
+		await poll();
+		expect(hub.started[1]).toMatchObject({ id: "s2", from: "s1", options: { provider: "gemini-web", model: "flash", mode: "act" } });
+		expect(hub.sessions.get("s2")).toEqual(["one", "two", "three"]);
+		// Options comments are not messages and get no reply.
+		expect(fake.comments.filter((c) => c.user.login === "bot")).toHaveLength(3);
+	});
+
 	test("restarts pick up where they left off without replaying", async () => {
 		await bridge.start();
 		await you.write("POST", `/repos/${fake.repo}/issues`, { title: "a", body: "one" });
@@ -219,6 +270,16 @@ describe("protocol", () => {
 		expect(parseCommand("/approve ap_1")).toEqual({ name: "approve", approvalId: "ap_1", reason: undefined });
 		expect(parseCommand("/deny ap_1 too risky")).toEqual({ name: "deny", approvalId: "ap_1", reason: "too risky" });
 		expect(parseCommand("please /stop")).toBeUndefined();
+	});
+
+	test("options lines parse and drop junk", () => {
+		expect(readOptions(withOptions({ provider: "x", model: "y", autoApprove: false }, "hi"))).toEqual({
+			provider: "x",
+			model: "y",
+			autoApprove: false,
+		});
+		expect(readOptions('<!-- minh-options {"mode":"fly","model":" "} -->\nhi')).toEqual({});
+		expect(readOptions("hi")).toBeUndefined();
 	});
 
 	test("since stays put for ten minutes", () => {

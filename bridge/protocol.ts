@@ -9,6 +9,11 @@
  *    GitHub hides HTML comments when it renders, so the chat stays readable
  *    on github.com too.
  *  - Commands are messages: /stop, /approve <id>, /deny <id>.
+ *  - Chat settings (provider, model, mode, tool approval) ride on an options
+ *    line, from the phone: at the top of the issue body for a new chat, or
+ *    as a comment of their own to change them mid-chat (no turn runs):
+ *      <!-- minh-options {"provider":"gemini-web","model":"gemini-pro"} -->
+ *  - The bridge publishes what can be picked in .minh/options.json.
  */
 
 export type ReplyState = "working" | "done" | "error" | "stopped";
@@ -42,6 +47,42 @@ export function readMarker(body: string | null | undefined): Marker | undefined 
 
 export function stripMarker(body: string): string {
 	return body.replace(MARKER_PATTERN, "");
+}
+
+export interface ChatOptions {
+	provider?: string;
+	model?: string;
+	mode?: "act" | "plan";
+	autoApprove?: boolean;
+}
+
+const OPTIONS_PATTERN = /^<!-- minh-options (\{.*?\}) -->\r?\n?/;
+
+export function withOptions(options: ChatOptions, text: string): string {
+	return `<!-- minh-options ${JSON.stringify(options)} -->\n${text}`;
+}
+
+/** The options line at the top of a body, cleaned up; undefined when there is none. */
+export function readOptions(body: string | null | undefined): ChatOptions | undefined {
+	const match = OPTIONS_PATTERN.exec(body ?? "");
+	if (!match) return undefined;
+	let raw: Record<string, unknown>;
+	try {
+		raw = JSON.parse(match[1]);
+	} catch {
+		return undefined;
+	}
+	const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+	const options: ChatOptions = {};
+	if (text(raw.provider)) options.provider = text(raw.provider);
+	if (text(raw.model)) options.model = text(raw.model);
+	if (raw.mode === "act" || raw.mode === "plan") options.mode = raw.mode;
+	if (typeof raw.autoApprove === "boolean") options.autoApprove = raw.autoApprove;
+	return options;
+}
+
+export function stripOptions(body: string): string {
+	return body.replace(OPTIONS_PATTERN, "");
 }
 
 export type Command =

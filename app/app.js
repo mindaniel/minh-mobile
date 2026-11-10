@@ -92,6 +92,20 @@ function chatTitle(text) {
 }
 const isCommand = (text) => /^\/(stop|approve|deny)\b/i.test(text.trim());
 
+// Chat settings line: top of the issue body, or a comment of its own mid-chat.
+const OPTIONS = /^<!-- minh-options (\{.*?\}) -->\r?\n?/;
+function readOptions(body) {
+	const match = OPTIONS.exec(body || "");
+	if (!match) return undefined;
+	try {
+		return JSON.parse(match[1]);
+	} catch {
+		return {};
+	}
+}
+const stripOptions = (body) => (body || "").replace(OPTIONS, "");
+const withOptions = (options, text) => `<!-- minh-options ${JSON.stringify(options)} -->\n${text}`;
+
 // ---------- state ----------
 
 let chats = [];
@@ -221,6 +235,7 @@ function newChat() {
 	$("messages").innerHTML = "";
 	$("empty").hidden = false;
 	updateComposer();
+	updateOptionsLabel();
 	renderChatList();
 	$("input").focus();
 }
@@ -293,12 +308,14 @@ function renderMessages() {
 	const stick = nearBottom();
 	const parts = [];
 	if (current.issue) {
-		parts.push(`<div class="msg-user">${escapeHtml(current.issue.body?.trim() || current.issue.title)}</div>`);
+		parts.push(`<div class="msg-user">${escapeHtml(stripOptions(current.issue.body).trim() || current.issue.title)}</div>`);
 	}
 	for (const comment of current.comments) {
 		const marker = readMarker(comment.body);
 		if (!marker) {
-			if (isCommand(comment.body)) {
+			if (readOptions(comment.body)) {
+				parts.push(`<div class="msg-note">${escapeHtml(stripOptions(comment.body).trim() || "Settings changed")}</div>`);
+			} else if (isCommand(comment.body)) {
 				const text = comment.body.trim().split(/\s+/)[0].slice(1);
 				parts.push(`<div class="msg-note">${text === "stop" ? "Stopped by you" : text === "approve" ? "You approved" : "You denied"}</div>`);
 			} else {
@@ -323,8 +340,10 @@ function renderMessages() {
 		}
 	}
 	for (const text of pending) parts.push(`<div class="msg-user sending">${escapeHtml(text)}</div>`);
-	const last = current.comments[current.comments.length - 1];
-	if (pending.length || (last && !readMarker(last.body) && !isCommand(last.body)) || (!current.comments.length && current.issue)) {
+	// Waiting on the bridge: the last thing said is a message of yours with no reply yet.
+	const said = current.comments.filter((c) => !readOptions(c.body));
+	const last = said[said.length - 1];
+	if (pending.length || (last && !readMarker(last.body) && !isCommand(last.body)) || (!said.length && current.issue)) {
 		parts.push(`<div class="msg-bot"><div class="working"><i></i><i></i><i></i></div></div>`);
 	}
 	$("messages").innerHTML = parts.join("");
@@ -337,6 +356,7 @@ function renderMessages() {
 		if (/\/approve/.test(p.textContent)) p.remove();
 	}
 	updateComposer();
+	updateOptionsLabel();
 	if (stick) scrollToBottom();
 }
 
@@ -393,7 +413,9 @@ async function createChat(text) {
 	$("empty").hidden = true;
 	$("messages").innerHTML = `<div class="msg-user sending">${escapeHtml(text)}</div>`;
 	try {
-		const issue = (await gh(repoPath("/issues"), { method: "POST", body: { title: chatTitle(text), body: text } })).data;
+		const options = newChatOptions();
+		const body = Object.keys(options).length ? withOptions(options, text) : text;
+		const issue = (await gh(repoPath("/issues"), { method: "POST", body: { title: chatTitle(text), body } })).data;
 		chats.unshift(issue);
 		current = { number: issue.number, title: issue.title, issue, comments: [] };
 		history.replaceState(null, "", `?chat=${issue.number}`);
@@ -431,6 +453,146 @@ async function postComment(text, { quiet = false } = {}) {
 		toast(err.message);
 	}
 }
+
+// ---------- model and settings ----------
+
+// What the bridge can run, from .minh/options.json: { defaults, providers: [{ id, name, model, models }] }.
+let catalog = null;
+
+async function loadCatalog() {
+	try {
+		const { data } = await gh(repoPath("/contents/.minh/options.json"), {
+			accept: "application/vnd.github.raw",
+			conditional: true,
+		});
+		catalog = typeof data === "string" ? JSON.parse(data) : data;
+	} catch {}
+	updateOptionsLabel();
+}
+
+const providerInfo = (id) => catalog?.providers?.find((p) => p.id === id);
+function modelName(provider, model) {
+	return providerInfo(provider)?.models?.find((m) => m.id === model)?.name || model || "Default model";
+}
+
+/** Settings a new chat starts with: the bridge's defaults, then your last picks. */
+function newChatOptions() {
+	return { ...(catalog?.defaults || {}), ...(settings.draftOptions || {}) };
+}
+
+/** Settings the open chat runs with: what it started with, then each change in order. */
+function chatOptions() {
+	let options = { ...(catalog?.defaults || {}), ...(readOptions(current?.issue?.body) || {}) };
+	for (const comment of current?.comments || []) {
+		const change = readOptions(comment.body);
+		if (change && !readMarker(comment.body)) options = { ...options, ...change };
+	}
+	return options;
+}
+
+function describeOptions(options) {
+	const bits = [modelName(options.provider, options.model)];
+	if (options.mode === "plan") bits.push("Plan");
+	if (options.autoApprove === false) bits.push("Ask me");
+	return bits.join(" · ");
+}
+
+function updateOptionsLabel() {
+	$("options-label").textContent = describeOptions(current ? chatOptions() : newChatOptions());
+}
+
+const sheet = $("options-sheet");
+const OTHER = "\u0000other";
+
+function fillModels(provider, model) {
+	const select = $("opt-model");
+	const text = $("opt-model-text");
+	const models = providerInfo(provider)?.models || [];
+	if (!models.length) {
+		select.hidden = true;
+		text.hidden = false;
+		text.value = model || providerInfo(provider)?.model || "";
+		return;
+	}
+	const known = models.some((m) => m.id === model);
+	select.innerHTML =
+		models.map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join("") +
+		`<option value="${OTHER}">Other…</option>`;
+	select.hidden = false;
+	select.value = known ? model : model ? OTHER : models[0].id;
+	text.hidden = select.value !== OTHER;
+	text.value = known ? "" : model || "";
+}
+
+function setSegment(name, value) {
+	for (const button of sheet.querySelectorAll(`.segmented[data-name="${name}"] button`)) {
+		button.classList.toggle("on", button.dataset.value === String(value));
+	}
+}
+function getSegment(name) {
+	return sheet.querySelector(`.segmented[data-name="${name}"] button.on`)?.dataset.value;
+}
+
+async function openSheet(open) {
+	sheet.hidden = !open;
+	$("sheet-scrim").hidden = !open;
+	if (!open) return;
+	if (!catalog) await loadCatalog();
+	const options = current ? chatOptions() : newChatOptions();
+	$("sheet-title").textContent = current ? "This chat" : "New chat";
+	const providers = [...(catalog?.providers || [])];
+	if (options.provider && !providers.some((p) => p.id === options.provider)) {
+		providers.unshift({ id: options.provider, name: options.provider, models: [] });
+	}
+	$("opt-provider").innerHTML = providers
+		.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`)
+		.join("");
+	$("opt-provider").value = options.provider || providers[0]?.id || "";
+	fillModels($("opt-provider").value, options.model);
+	setSegment("mode", options.mode || "act");
+	setSegment("autoApprove", options.autoApprove ?? true);
+	$("sheet-hint").textContent = !catalog
+		? "No model list yet. Start the bridge once; it lists the providers you set up in minh."
+		: current
+			? "Applies from your next message. A new model keeps this chat's history."
+			: "Used for new chats from now on.";
+}
+
+$("options-btn").addEventListener("click", () => openSheet(true));
+$("sheet-scrim").addEventListener("click", () => openSheet(false));
+$("opt-provider").addEventListener("change", (event) => {
+	fillModels(event.target.value, providerInfo(event.target.value)?.model);
+});
+$("opt-model").addEventListener("change", (event) => {
+	$("opt-model-text").hidden = event.target.value !== OTHER;
+	if (event.target.value === OTHER) $("opt-model-text").focus();
+});
+sheet.addEventListener("click", (event) => {
+	const button = event.target.closest(".segmented button");
+	if (button) setSegment(button.parentElement.dataset.name, button.dataset.value);
+});
+
+sheet.addEventListener("submit", async (event) => {
+	event.preventDefault();
+	const select = $("opt-model");
+	const model = (select.hidden || select.value === OTHER ? $("opt-model-text").value : select.value).trim();
+	const picked = {
+		...($("opt-provider").value ? { provider: $("opt-provider").value } : {}),
+		...(model ? { model } : {}),
+		mode: getSegment("mode") || "act",
+		autoApprove: getSegment("autoApprove") !== "false",
+	};
+	openSheet(false);
+	saveSettings({ draftOptions: picked });
+	if (current) {
+		const before = chatOptions();
+		const change = Object.fromEntries(Object.entries(picked).filter(([key, value]) => before[key] !== value));
+		if (Object.keys(change).length) {
+			await postComment(withOptions(change, `Switched to ${describeOptions({ ...before, ...picked })}`), { quiet: true });
+		}
+	}
+	updateOptionsLabel();
+});
 
 // ---------- notifications ----------
 
@@ -504,6 +666,7 @@ function start() {
 	$("app").hidden = false;
 	$("account-name").textContent = `${settings.login || ""} · ${settings.repo}`;
 	refreshList();
+	loadCatalog();
 	clearInterval(listTimer);
 	listTimer = setInterval(() => document.visibilityState === "visible" && refreshList(), LIST_POLL_MS);
 	const wanted = Number(new URLSearchParams(location.search).get("chat"));

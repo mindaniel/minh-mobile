@@ -46,6 +46,12 @@ Each person (each Windows account on the server) runs their own bridge, with the
 ## Using it
 
 - **New chat:** tap **+** and type. You can also open an issue on github.com.
+- **Model and settings:** tap the model name under the message box to pick:
+  - **Provider and model:** chosen from the ones set up in minh on the server. The bridge lists them in `.minh/options.json` when it starts and every 10 minutes.
+  - **Mode:** Act or Plan.
+  - **Tools:** run freely, or ask you each time.
+
+  With no chat open, your picks apply to new chats. Inside a chat, they apply from your next message. A new model or tool setting starts a fresh minh session that carries over the chat's history.
 - **Stop:** the stop button, or comment `/stop`.
 - **Approvals:** when `autoApproveTools` is off, each tool call shows Approve/Deny. You can also comment `/approve <id>` or `/deny <id>`.
 - **Archive a chat:** close the issue on github.com.

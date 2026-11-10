@@ -56,6 +56,10 @@ class FakeHub {
 		this.emit(sessionId, "runtime.chat.text_delta", { text: `echo: ${prompt}` });
 		return { text: `echo: ${prompt}`, finishReason: "completed" };
 	}
+	released: string[] = [];
+	async release(sessionId: string) {
+		this.released.push(sessionId);
+	}
 	async abort(sessionId: string) {
 		this.aborts.get(sessionId)?.();
 	}
@@ -239,6 +243,21 @@ describe("bridge", () => {
 		expect(hub.sessions.get("s2")).toEqual(["one", "two", "three"]);
 		// Options comments are not messages and get no reply.
 		expect(fake.comments.filter((c) => c.user.login === "bot")).toHaveLength(3);
+	});
+
+	test("archiving a chat lets its session go; restoring brings it back", async () => {
+		await bridge.start();
+		await you.write("POST", `/repos/${fake.repo}/issues`, { title: "a", body: "one" });
+		await poll();
+		await you.write("PATCH", `/repos/${fake.repo}/issues/1`, { state: "closed" });
+		await poll();
+		await poll();
+		expect(hub.released).toEqual(["s1"]);
+		await you.write("PATCH", `/repos/${fake.repo}/issues/1`, { state: "open" });
+		await you.addComment(1, "two");
+		await poll();
+		expect(hub.sessions.get("s1")).toEqual(["one", "two"]);
+		expect(hub.sessions.size).toBe(1);
 	});
 
 	test("restarts pick up where they left off without replaying", async () => {

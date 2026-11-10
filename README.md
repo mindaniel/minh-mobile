@@ -54,7 +54,12 @@ Each person (each Windows account on the server) runs their own bridge, with the
   With no chat open, your picks apply to new chats. Inside a chat, they apply from your next message. A new model or tool setting starts a fresh minh session that carries over the chat's history.
 - **Stop:** the stop button, or comment `/stop`.
 - **Approvals:** when `autoApproveTools` is off, each tool call shows Approve/Deny. You can also comment `/approve <id>` or `/deny <id>`.
-- **Archive a chat:** close the issue on github.com.
+- **Organize:** tap **⋯** in an open chat, or long-press a chat in the list (right-click on a computer):
+  - **Rename** a chat.
+  - **Pin** it to the top of the list. This adds the `pinned` label.
+  - **Archive** it. This closes the issue, and the bridge stops its minh session. Archived chats are under **Archived chats** in the drawer; **Restore** brings one back.
+  - **Delete** it. A real delete needs admin rights on the repo. With the phone token, the chat's messages are removed and the issue is closed and hidden instead.
+- **Search:** the box at the top of the drawer filters chats by title.
 - **Delays:** about 3 to 6 seconds each way. Replies grow in steps every few seconds, not word by word.
 - **Restarts:** the bridge picks up where it left off. A chat whose session stopped is revived from its transcript.
 - **Open in minh:** a chat still open in a minh terminal window can't be continued from the phone until you close it there.

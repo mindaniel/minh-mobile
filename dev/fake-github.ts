@@ -12,6 +12,8 @@ type Issue = {
 	body: string | null;
 	state: "open" | "closed";
 	user: { login: string };
+	labels: Array<{ name: string }>;
+	node_id: string;
 	created_at: string;
 	updated_at: string;
 };
@@ -103,13 +105,33 @@ export function createFakeGitHub(options: { port?: number; repo?: string } = {})
 					body: body.body ?? null,
 					state: "open",
 					user: { login },
+					labels: [],
+					node_id: `I_${issues.length + 1}`,
 					created_at: now(),
 					updated_at: now(),
 				};
 				issues.push(issue);
 				return json(withHtml(issue), 201);
 			}
-			let match = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path);
+			// Like a token without admin rights: deleting issues is refused.
+			if (path === "/graphql") {
+				return json({ errors: [{ type: "FORBIDDEN", message: "Resource not accessible by personal access token" }] });
+			}
+			let match = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/labels(?:\/([^/]+))?$/.exec(path);
+			if (match) {
+				const issue = issues.find((item) => item.number === Number(match![1]));
+				if (!issue) return json({ message: "Not Found" }, 404);
+				if (request.method === "POST") {
+					for (const name of body.labels as string[]) {
+						if (!issue.labels.some((label) => label.name === name)) issue.labels.push({ name });
+					}
+				} else if (request.method === "DELETE" && match[2]) {
+					issue.labels = issue.labels.filter((label) => label.name !== decodeURIComponent(match![2]));
+				}
+				issue.updated_at = now();
+				return json(issue.labels);
+			}
+			match = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path);
 			if (match) {
 				const issue = issues.find((item) => item.number === Number(match![1]));
 				if (!issue) return json({ message: "Not Found" }, 404);
@@ -151,6 +173,10 @@ export function createFakeGitHub(options: { port?: number; repo?: string } = {})
 			if (match) {
 				const comment = comments.find((c) => c.id === Number(match![1]));
 				if (!comment) return json({ message: "Not Found" }, 404);
+				if (request.method === "DELETE") {
+					comments.splice(comments.indexOf(comment), 1);
+					return new Response(null, { status: 204, headers: cors });
+				}
 				if (request.method === "PATCH") {
 					comment.body = body.body;
 					comment.updated_at = now();

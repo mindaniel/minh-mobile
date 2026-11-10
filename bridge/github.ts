@@ -158,7 +158,8 @@ export class GitHub {
 	/** Open issues updated recently, newest first. */
 	recentIssues(): Promise<Issue[] | undefined> {
 		return this.getIfChanged(
-			`/repos/${this.repo}/issues?state=open&sort=updated&direction=desc&per_page=50`,
+			// All states: closing a chat (archive, delete) is how the bridge hears to let it go.
+			`/repos/${this.repo}/issues?state=all&sort=updated&direction=desc&per_page=50`,
 		);
 	}
 

@@ -36,6 +36,8 @@ interface ChatState {
 	options?: ChatOptions;
 	/** provider|model|autoApprove the session runs with; a change starts a new one. */
 	applied?: string;
+	/** The issue is closed (archived or deleted) and its session let go. */
+	closed?: boolean;
 }
 
 export const OPTIONS_FILE = ".minh/options.json";
@@ -180,6 +182,19 @@ export class Bridge {
 
 	private onIssue(issue: Issue): void {
 		if (issue.pull_request || !this.allowed(issue.user.login)) return;
+		const known = this.state.chats[issue.number];
+		if (issue.state === "closed") {
+			// Archived or deleted on the phone: stop the run and let the session go.
+			if (known && !known.closed) {
+				known.closed = true;
+				void this.release(issue.number).catch((error) =>
+					console.warn(`issue #${issue.number}: could not stop its session:`, (error as Error).message),
+				);
+			}
+			return;
+		}
+		// Restored: the next message brings the session back from its transcript.
+		if (known?.closed) known.closed = false;
 		if (this.state.openedIssues.includes(issue.number)) return;
 		if (issue.created_at < this.state.startedAt) return;
 		this.state.openedIssues.push(issue.number);
@@ -337,6 +352,13 @@ export class Bridge {
 		for (const [approvalId, pending] of this.approvals) {
 			if (pending.issue === issue) void this.settleApproval(approvalId, "expired");
 		}
+	}
+
+	private async release(issue: number): Promise<void> {
+		const sessionId = this.state.chats[issue]?.sessionId;
+		if (!sessionId) return;
+		if (this.active.has(sessionId)) await this.hub.abort(sessionId);
+		await this.hub.release(sessionId);
 	}
 
 	private async runCommand(

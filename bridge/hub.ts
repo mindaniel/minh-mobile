@@ -282,6 +282,11 @@ export class Hub {
 		};
 	}
 
+	/** Stop running a session; its transcript stays, so it can come back. */
+	async release(sessionId: string): Promise<void> {
+		await this.client.stopRuntimeSession(sessionId).catch(() => undefined);
+	}
+
 	abort(sessionId: string): Promise<unknown> {
 		return this.client.abortRuntimeSession(sessionId);
 	}

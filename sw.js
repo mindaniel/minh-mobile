@@ -1,5 +1,5 @@
 // Keeps the app opening offline and shows push notifications from the bridge.
-const CACHE = "minh-v3";
+const CACHE = "minh-v4";
 const SHELL = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (event) => {

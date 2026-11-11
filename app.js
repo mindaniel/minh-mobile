@@ -657,6 +657,9 @@ function renderMessages() {
 			parts.push(
 				`<div class="msg-bot${marker.state === "error" ? " error" : ""}">${html}${working ? `<div class="working"><i></i><i></i><i></i></div>` : ""}</div>`,
 			);
+		} else if (marker.kind === "user") {
+			// Typed in a minh window on the server, copied in by the bridge.
+			parts.push(`<div class="msg-user">${escapeHtml(comment.body.replace(MARKER, "").trim())}</div>`);
 		} else if (marker.kind === "approval") {
 			const actions =
 				marker.state === "pending"
